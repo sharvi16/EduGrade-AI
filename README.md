@@ -3,7 +3,7 @@
 Integrated grading and proctoring platform for automated exam evaluation and monitoring.
 
 ## Features
-- **Automated Grading**: OCR-based assignment and medical form processing.
+- **Automated Grading**: OCR-based assignment and exam processing.
 - **AI Proctoring**: Real-time face detection, eye tracking, and behavior monitoring.
 - **Teacher Portal**: Comprehensive dashboard for managing exams and viewing results.
 - **Student Dashboard**: Interface for taking exams and viewing grades.
