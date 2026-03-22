@@ -9,15 +9,20 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     
-    # Check if Super Admin exists
-    if not db.query(User).filter(User.role == UserRole.SUPER_ADMIN).first():
+    # Check if Super Admin exists, create if not
+    admin_email = "admin@edugrade.ai"
+    if not db.query(User).filter(User.email == admin_email).first():
         super_admin = User(
-            email="admin@edugrade.ai",
+            email=admin_email,
             password_hash=pwd_context.hash("admin123"),
             name="Super Admin",
             role=UserRole.SUPER_ADMIN
         )
         db.add(super_admin)
+        db.commit()
+        print(f"Admin account {admin_email} created successfully.")
+    else:
+        print(f"Admin account {admin_email} already exists.")
         
         # Add a sample school
         school = School(name="Greenwood High")
