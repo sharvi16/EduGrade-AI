@@ -5,12 +5,8 @@ Shared utilities for the Assignment Grading System
 - Groq Vision text extraction
 """
 
-import base64
 import os
 import tempfile
-
-import cv2
-import fitz  # PyMuPDF
 import numpy as np
 from dotenv import load_dotenv
 from groq import Groq
@@ -28,6 +24,7 @@ GROQ_TEXT_MODEL   = "llama-3.3-70b-versatile"
 
 def enhance_image_bytes(img_bytes: bytes) -> bytes:
     """Enhance image bytes: upscale if small, CLAHE contrast boost. Returns JPEG bytes under 4MB."""
+    import cv2
     arr = np.frombuffer(img_bytes, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
@@ -71,6 +68,7 @@ def enhance_image_file(image_path: str) -> bytes:
 
 
 def image_to_base64(image_bytes: bytes) -> str:
+    import base64
     return base64.b64encode(image_bytes).decode("utf-8")
 
 
@@ -81,6 +79,7 @@ def pdf_to_image_bytes_list(pdf_path: str, dpi: int = 200) -> list[bytes]:
     Convert each page of a PDF to a JPEG bytes object.
     Returns a list — one item per page.
     """
+    import fitz
     doc = fitz.open(pdf_path)
     pages = []
     mat = fitz.Matrix(dpi / 72, dpi / 72)  # scale factor
