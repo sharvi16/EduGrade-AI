@@ -35,8 +35,12 @@ app.add_middleware(
 )
 
 from init_db import init_db
-Base.metadata.create_all(bind=engine)
-init_db()
+try:
+    Base.metadata.create_all(bind=engine)
+    init_db()
+    print("Database auto-init successful.")
+except Exception as e:
+    print(f"Database auto-init failed (will retry): {e}")
 
 security = HTTPBearer()
 
