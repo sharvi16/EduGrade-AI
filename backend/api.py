@@ -23,7 +23,7 @@ app = FastAPI(title="EduGrade AI API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"],
+    allow_origins=["*"], # For production ease; restrict this later to your specific Vercel URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
