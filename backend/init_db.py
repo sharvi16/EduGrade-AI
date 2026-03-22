@@ -1,28 +1,30 @@
 from database import SessionLocal, engine, Base
 from models import User, School, UserRole
-from passlib.context import CryptContext
+import bcrypt
 from datetime import datetime
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def init_db():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     
-    # Check if Super Admin exists, create if not
+    # ENSURE Super Admin exists and password is reset to admin123
     admin_email = "admin@edugrade.ai"
-    if not db.query(User).filter(User.email == admin_email).first():
-        super_admin = User(
+    admin = db.query(User).filter(User.email == admin_email).first()
+    if not admin:
+        admin = User(
             email=admin_email,
-            password_hash=pwd_context.hash("admin123"),
+            password_hash=bcrypt.hashpw("admin123".encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
             name="Super Admin",
             role=UserRole.SUPER_ADMIN
         )
-        db.add(super_admin)
+        db.add(admin)
         db.commit()
-        print(f"Admin account {admin_email} created successfully.")
+        db.refresh(admin)
+        print(f"Admin account {admin_email} created.")
     else:
-        print(f"Admin account {admin_email} already exists.")
+        admin.password_hash = bcrypt.hashpw("admin123".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        db.commit()
+        print(f"Admin password for {admin_email} has been FORCE RESET.")
         
         # Add a sample school
         school = School(name="Greenwood High")
@@ -33,7 +35,7 @@ def init_db():
         # Add a principal for that school
         principal = User(
             email="principal@greenwood.com",
-            password_hash=pwd_context.hash("prin123"),
+            password_hash=bcrypt.hashpw("prin123".encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
             name="Principal Verma",
             role=UserRole.PRINCIPAL,
             school_id=school.id
@@ -43,7 +45,7 @@ def init_db():
         # Add a teacher representing current demo
         teacher = User(
             email="teacher@school.com",
-            password_hash=pwd_context.hash("teach123"),
+            password_hash=bcrypt.hashpw("teach123".encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
             name="Prof. Sharma",
             role=UserRole.TEACHER,
             school_id=school.id
@@ -55,7 +57,7 @@ def init_db():
         # Add a student representing current demo
         student = User(
             email="student@school.com",
-            password_hash=pwd_context.hash("study123"),
+            password_hash=bcrypt.hashpw("study123".encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
             name="Rahul Mehta",
             role=UserRole.STUDENT,
             school_id=school.id,
