@@ -14,6 +14,16 @@ Integrated grading and proctoring platform for automated exam evaluation and mon
 - **Hierarchical Isolation**: Strict data isolation ensuring Teachers only see their classes and students only see their exams.
 - **Premium UI/UX**: World-class, elevated design featuring glassmorphism, vibrant gradients, and professional typography.
 
+## Demo Credentials
+To explore the platform's role-based dashboards, use the following credentials on the [Live Site](https://edu-grade-ai.vercel.app):
+
+| Role | Email | Password |
+| :--- | :--- | :--- |
+| **Super Admin** | `admin@edugrade.ai` | `admin123` |
+| **Principal** | `principal@greenwood.com` | `prin123` |
+| **Teacher** | `teacher@school.com` | `teach123` |
+| **Student** | `student@school.com` | `study123` |
+
 ## Project Structure
 - `/frontend`: React-based multi-role interface (Vite, TypeScript, Tailwind CSS, Lucide Icons).
 - `/backend`: Python-based API and AI processing engine (FastAPI, Groq SDK, SQLAlchemy, SQLite).

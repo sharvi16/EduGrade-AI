@@ -201,6 +201,80 @@ const LoginPage: React.FC = () => {
 
                 </div>
             </div>
+            {/* ── Demo Access Helper ─────────────────────────────── */}
+            <div className="demo-helper" style={{ 
+                position: 'fixed', 
+                bottom: 20, 
+                right: 20, 
+                zIndex: 1000 
+            }}>
+                <button 
+                    type="button"
+                    onClick={(e) => {
+                        const el = document.getElementById('demo-popover');
+                        if (el) el.style.display = el.style.display === 'block' ? 'none' : 'block';
+                    }}
+                    className="demo-btn"
+                    style={{
+                        background: 'rgba(255, 255, 255, 0.1)',
+                        backdropFilter: 'blur(10px)',
+                        border: '1px solid rgba(255, 255, 255, 0.2)',
+                        color: 'white',
+                        padding: '8px 16px',
+                        borderRadius: '20px',
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        cursor: 'pointer',
+                        boxShadow: '0 4px 15px rgba(0,0,0,0.1)',
+                        transition: 'all 0.3s ease'
+                    }}
+                >
+                    🔑 Demo Access
+                </button>
+                <div id="demo-popover" style={{
+                    display: 'none',
+                    position: 'absolute',
+                    bottom: '100%',
+                    right: 0,
+                    marginBottom: 10,
+                    background: 'rgba(15, 23, 42, 0.9)',
+                    backdropFilter: 'blur(20px)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '16px',
+                    padding: '16px',
+                    width: '320px',
+                    boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+                    color: 'white'
+                }}>
+                    <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', color: '#38bdf8' }}>Demo Credentials</h4>
+                    <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
+                        <thead>
+                            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                                <th style={{ textAlign: 'left', padding: '4px 0' }}>Role</th>
+                                <th style={{ textAlign: 'left', padding: '4px 0' }}>Email</th>
+                                <th style={{ textAlign: 'left', padding: '4px 0' }}>Pass</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {[
+                                { r: 'Admin', e: 'admin@edugrade.ai', p: 'admin123' },
+                                { r: 'Principal', e: 'principal@greenwood.com', p: 'prin123' },
+                                { r: 'Teacher', e: 'teacher@school.com', p: 'teach123' },
+                                { r: 'Student', e: 'student@school.com', p: 'study123' }
+                            ].map(x => (
+                                <tr key={x.e} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                    <td style={{ padding: '6px 0', color: '#94a3b8' }}>{x.r}</td>
+                                    <td style={{ padding: '6px 0' }}>{x.e}</td>
+                                    <td style={{ padding: '6px 0' }}>{x.p}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                    <p style={{ margin: '12px 0 0 0', fontSize: '10px', color: '#64748b' }}>
+                        Click the button again to hide this panel.
+                    </p>
+                </div>
+            </div>
         </div>
     );
 };
