@@ -34,7 +34,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from init_db import init_db
 Base.metadata.create_all(bind=engine)
+init_db()
 
 security = HTTPBearer()
 
