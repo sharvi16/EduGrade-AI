@@ -2,7 +2,7 @@
 
 Integrated grading and proctoring platform for automated exam evaluation and monitoring, now featuring a full-scale hierarchical institution management system.
 
-## New: Hierarchical Management
+## Hierarchical Management
 - **Super Admin Hub**: Manage global school infrastructure and deploy Principals.
 - **Principal Dashboard**: Oversee faculty (Teachers) and school-wide academic data.
 - **Teacher Portal**: Manage student enrollments, exam creation, and automated grading.
