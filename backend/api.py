@@ -9,6 +9,15 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Depends, Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+from database import get_db, engine, Base
+import models
+from auth import verify_password, create_access_token, decode_access_token
+from pydantic import BaseModel
+from groq import Groq
 from contextlib import asynccontextmanager
 from init_db import init_db
 
@@ -23,9 +32,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"Database auto-init failed during lifespan: {e}")
     yield
-    # Shutdown logic goes here if needed
 
 app = FastAPI(title="EduGrade AI API", version="1.0.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:3000",
+        "https://edu-grade-ai.vercel.app"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 security = HTTPBearer()
 
