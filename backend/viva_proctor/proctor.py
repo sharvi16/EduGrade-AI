@@ -1,4 +1,4 @@
-﻿"""
+"""
 viva_proctor/proctor.py
 =======================
 CV-based proctoring engine for the Viva examination phase.
@@ -15,15 +15,19 @@ import base64
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 
-import cv2
-import numpy as np
+# Global lazy-loaded cascades
+_cascades: Dict[str, any] = {}
 
-# ── Haar cascades ────────────────────────────────────────────────
-_face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-_face_alt_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_alt2.xml")
-_profile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
+def _get_cascades():
+    global _cascades
+    import cv2
+    if not _cascades:
+        _cascades["face"] = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        _cascades["face_alt"] = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_alt2.xml")
+        _cascades["profile"] = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
+    return _cascades["face"], _cascades["face_alt"], _cascades["profile"]
 
 # ── Detection parameters ─────────────────────────────────────────
 # Relaxed minNeighbors so we have better recall on webcam feeds
@@ -44,6 +48,9 @@ def check_frame_base64(b64_image: str) -> Tuple[bool, str]:
     Decode a base64 JPEG/PNG frame and run face detection.
     Returns (is_looking_at_screen, reason_code)
     """
+    import cv2
+    import numpy as np
+
     try:
         if "," in b64_image:
             b64_image = b64_image.split(",", 1)[1]
@@ -56,11 +63,13 @@ def check_frame_base64(b64_image: str) -> Tuple[bool, str]:
     if frame is None:
         return True, "invalid_frame"
 
+    # Get lazy-loaded cascades
+    face_cascade, face_alt_cascade, profile_cascade = _get_cascades()
+
     # Convert to grayscale directly
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
     # Test original, 90 deg clockwise, and 90 deg counter-clockwise
-    # This solves the issue where specific webcams/phones send rotated frames.
     images_to_check = [
         gray,
         cv2.rotate(gray, cv2.ROTATE_90_CLOCKWISE),
@@ -69,17 +78,17 @@ def check_frame_base64(b64_image: str) -> Tuple[bool, str]:
 
     for img in images_to_check:
         # 1. Try Frontal Face Default
-        faces = _face_cascade.detectMultiScale(img, scaleFactor=1.1, minNeighbors=3, minSize=(40, 40))
+        faces = face_cascade.detectMultiScale(img, scaleFactor=1.1, minNeighbors=3, minSize=(40, 40))
         if len(faces) > 0:
             return True, "looking"
             
         # 2. Try Frontal Face Alt2
-        faces_alt = _face_alt_cascade.detectMultiScale(img, scaleFactor=1.1, minNeighbors=3, minSize=(40, 40))
+        faces_alt = face_alt_cascade.detectMultiScale(img, scaleFactor=1.1, minNeighbors=3, minSize=(40, 40))
         if len(faces_alt) > 0:
             return True, "looking"
             
         # 3. Try Profile Face
-        faces_prof = _profile_cascade.detectMultiScale(img, scaleFactor=1.1, minNeighbors=3, minSize=(40, 40))
+        faces_prof = profile_cascade.detectMultiScale(img, scaleFactor=1.1, minNeighbors=3, minSize=(40, 40))
         if len(faces_prof) > 0:
             return True, "looking"
 
