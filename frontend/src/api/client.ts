@@ -10,9 +10,33 @@ import type {
 } from "../types";
 
 const api = axios.create({
-  baseURL: "http://localhost:8000",
-  timeout: 120000, // Vision calls can be slow
+  baseURL: "http://127.0.0.1:8000",
+  timeout: 120000,
 });
+
+api.interceptors.request.use((config) => {
+  const user = localStorage.getItem("edugrade_user");
+  if (user) {
+    const { token } = JSON.parse(user);
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
+
+// ── Management ──────────────────────────────────────────────────
+export const listSchools = (): Promise<any[]> =>
+  api.get("/admin/schools").then((r) => r.data);
+
+export const createSchool = (name: string): Promise<any> =>
+  api.post("/admin/schools", { name }).then((r) => r.data);
+
+export const createUser = (userData: any): Promise<any> =>
+  api.post("/admin/users", userData).then((r) => r.data);
+
+export const listUsers = (): Promise<any[]> =>
+  api.get("/admin/users").then((r) => r.data);
 
 // ── Exam CRUD ──────────────────────────────────────────────────────
 export const listExams = (): Promise<Exam[]> =>

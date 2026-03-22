@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useAuth, type Role } from "@/context/AuthContext";
 
 const EyeIcon = ({ open }: { open: boolean }) =>
@@ -16,20 +16,12 @@ const EyeIcon = ({ open }: { open: boolean }) =>
         </svg>
     );
 
-const DEMO: Record<Role, { email: string; password: string }> = {
-    teacher: { email: "teacher@school.com", password: "teach123" },
-    student: { email: "student@school.com", password: "study123" },
-};
-
 const LoginPage: React.FC = () => {
     const { login } = useAuth();
     const navigate = useNavigate();
-    const location = useLocation();
-    const from = (location.state as { from?: { pathname: string } })?.from?.pathname || "/grade";
-
     const [role, setRole] = useState<Role>("student");
-    const [email, setEmail] = useState(DEMO.student.email);
-    const [password, setPassword] = useState(DEMO.student.password);
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
     const [showPass, setShowPass] = useState(false);
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
@@ -37,8 +29,6 @@ const LoginPage: React.FC = () => {
 
     const switchRole = (r: Role) => {
         setRole(r);
-        setEmail(DEMO[r].email);
-        setPassword(DEMO[r].password);
         setError("");
     };
 
@@ -46,13 +36,15 @@ const LoginPage: React.FC = () => {
         e.preventDefault();
         setLoading(true);
         setError("");
-        await new Promise(r => setTimeout(r, 600)); // brief loading feel
-        const ok = login(email, password, role);
+        const ok = await login(email, password);
         if (ok) {
-            navigate(role === "teacher" ? "/teacher" : from, { replace: true });
+            // Wait for context update
+            setTimeout(() => {
+                navigate("/", { replace: true });
+            }, 100);
         } else {
             setLoading(false);
-            setError("Invalid email, password, or role. Please check your credentials.");
+            setError("Invalid email or password. Please check your credentials.");
             setShake(true);
             setTimeout(() => setShake(false), 500);
         }
@@ -108,32 +100,42 @@ const LoginPage: React.FC = () => {
 
                     {/* Role toggle */}
                     <div className="role-toggle" role="group" aria-label="Select role">
-                        {(["student", "teacher"] as Role[]).map(r => (
+                        {(["student", "teacher", "principal", "super_admin"] as Role[]).map(r => (
                             <button
                                 key={r}
                                 type="button"
                                 className={`role-toggle-btn${role === r ? " active" : ""}`}
                                 onClick={() => switchRole(r)}
+                                style={{ fontSize: '12px', padding: '8px 4px' }}
                             >
-                                <span className="role-icon">{r === "teacher" ? "🎓" : "📚"}</span>
-                                {r === "teacher" ? "Teacher" : "Student"}
+                                <span className="role-icon">
+                                    {r === "super_admin" ? "🛡️" : r === "principal" ? "🏫" : r === "teacher" ? "🎓" : "📚"}
+                                </span>
+                                {r === "super_admin" ? "Admin" : r === "principal" ? "Principal" : r === "teacher" ? "Teacher" : "Student"}
                             </button>
                         ))}
                     </div>
 
                     <form onSubmit={handleSubmit} className="login-form" noValidate>
+                        {/* Dummy inputs to fool browser autofill */}
+                        <input type="text" name="email" style={{ display: 'none' }} tabIndex={-1} />
+                        <input type="password" name="password" style={{ display: 'none' }} tabIndex={-1} />
+
                         <div className="login-field">
-                            <label htmlFor="email">Email address</label>
+                            <label htmlFor="user_login_email">Email address</label>
                             <div className="login-input-wrap">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="login-input-icon">
                                     <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
                                     <polyline points="22,6 12,13 2,6" />
                                 </svg>
                                 <input
-                                    id="email"
+                                    id="user_login_email"
+                                    name="user_login_email"
                                     type="email"
-                                    autoComplete="email"
+                                    autoComplete="new-password"
                                     required
+                                    readOnly
+                                    onFocus={(e) => e.target.removeAttribute('readonly')}
                                     value={email}
                                     onChange={e => { setEmail(e.target.value); setError(""); }}
                                     placeholder="you@school.com"
@@ -143,17 +145,20 @@ const LoginPage: React.FC = () => {
                         </div>
 
                         <div className="login-field">
-                            <label htmlFor="password">Password</label>
+                            <label htmlFor="user_login_pass">Password</label>
                             <div className="login-input-wrap">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="login-input-icon">
                                     <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
                                     <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                                 </svg>
                                 <input
-                                    id="password"
+                                    id="user_login_pass"
+                                    name="user_login_pass"
                                     type={showPass ? "text" : "password"}
-                                    autoComplete="current-password"
+                                    autoComplete="new-password"
                                     required
+                                    readOnly
+                                    onFocus={(e) => e.target.removeAttribute('readonly')}
                                     value={password}
                                     onChange={e => { setPassword(e.target.value); setError(""); }}
                                     placeholder="••••••••"
@@ -183,7 +188,9 @@ const LoginPage: React.FC = () => {
                                 </>
                             ) : (
                                 <>
-                                    Sign in as {role === "teacher" ? "Teacher" : "Student"}
+                                    Sign in as {role === "super_admin" ? "Admin" : 
+                                               role === "principal" ? "Principal" :
+                                               role === "teacher" ? "Teacher" : "Student"}
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ width: 15, height: 15 }}>
                                         <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
                                     </svg>
@@ -192,19 +199,6 @@ const LoginPage: React.FC = () => {
                         </button>
                     </form>
 
-                    <div className="login-hint">
-                        <span className="login-hint-label">Demo credentials</span>
-                        <div className="login-hint-grid">
-                            <div>
-                                <span className="login-hint-role">🎓 Teacher</span>
-                                <code>teacher@school.com / teach123</code>
-                            </div>
-                            <div>
-                                <span className="login-hint-role">📚 Student</span>
-                                <code>student@school.com / study123</code>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>

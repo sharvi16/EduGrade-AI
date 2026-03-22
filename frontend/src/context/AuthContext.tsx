@@ -1,39 +1,25 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 
-export type Role = "teacher" | "student";
+export type Role = "super_admin" | "principal" | "teacher" | "student";
 
 export interface AuthUser {
   name: string;
   email: string;
   role: Role;
+  token: string;
 }
 
 interface AuthContextValue {
   user: AuthUser | null;
-  login: (email: string, password: string, role: Role) => boolean;
+  login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
 }
-
-// Demo credentials
-const CREDENTIALS: Record<string, { password: string; name: string; role: Role }> = {
-  // Teachers
-  "teacher@school.com": { password: "teach123", name: "Prof. Sharma", role: "teacher" },
-  "teacher2@school.com": { password: "teach123", name: "Dr. Gupta", role: "teacher" },
-
-  // Students
-  "student@school.com": { password: "study123", name: "Rahul Mehta", role: "student" },
-  "student2@school.com": { password: "study123", name: "Priya Singh", role: "student" },
-  "student3@school.com": { password: "study123", name: "Amit Kumar", role: "student" },
-
-  // You can add Hackathon judges here if you want to use their names!
-  "judge@school.com": { password: "judge123", name: "Hackathon Judge", role: "teacher" },
-};
 
 const LS_KEY = "edugrade_user";
 
 const AuthContext = createContext<AuthContextValue>({
   user: null,
-  login: () => false,
+  login: async () => false,
   logout: () => { },
 });
 
@@ -52,12 +38,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     else localStorage.removeItem(LS_KEY);
   }, [user]);
 
-  const login = useCallback((email: string, password: string, role: Role): boolean => {
-    const cred = CREDENTIALS[email.toLowerCase().trim()];
-    if (!cred || cred.password !== password || cred.role !== role) return false;
-    setUser({ name: cred.name, email: email.toLowerCase().trim(), role: cred.role });
-    return true;
+  const login = useCallback(async (email: string, password: string): Promise<boolean> => {
+    try {
+      const response = await fetch("http://127.0.0.1:8000/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      if (!response.ok) return false;
+      const data = await response.json();
+      setUser({
+        name: data.user.name,
+        email: data.user.email,
+        role: data.user.role as Role,
+        token: data.access_token,
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }, []);
+
 
   const logout = useCallback(() => setUser(null), []);
 

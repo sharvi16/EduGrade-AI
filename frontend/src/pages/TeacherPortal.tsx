@@ -1,5 +1,4 @@
-﻿import React, { useCallback, useRef, useState } from "react";
-import { createExam, deleteExam, listExams, getExamSubmissions } from "../api/client";
+import { createExam, deleteExam, listExams, getExamSubmissions, listUsers } from "../api/client";
 import type { Exam, Submission } from "../types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,7 +6,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CheckCircle, XCircle, Trash2, RefreshCw, ChevronDown, ChevronUp, Upload, FileText, BookOpen, PlusCircle, ListChecks } from "lucide-react";
+import React, { useCallback, useRef, useState } from "react";
+import { CheckCircle, XCircle, Trash2, RefreshCw, ChevronDown, ChevronUp, Upload, FileText, BookOpen, PlusCircle, ListChecks, Users, Mail } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ── FileDrop ─────────────────────────────────────────────────────
@@ -86,7 +86,9 @@ const TeacherPortal: React.FC = () => {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [submissions, setSubmissions] = useState<Record<string, Submission[]>>({});
   const [loadingSubs, setLoadingSubs] = useState<Record<string, boolean>>({});
-
+  const [students, setStudents] = useState<any[]>([]);
+  const [loadingStudents, setLoadingStudents] = useState(false);
+  
   const toggleExpand = async (examId: string) => {
     if (expanded === examId) { setExpanded(null); return; }
     setExpanded(examId);
@@ -105,6 +107,18 @@ const TeacherPortal: React.FC = () => {
     setLoadingExams(true);
     try { const data = await listExams(); setExams(data.sort((a, b) => b.created_at.localeCompare(a.created_at))); }
     finally { setLoadingExams(false); }
+  }, []);
+
+  const fetchStudents = useCallback(async () => {
+    setLoadingStudents(true);
+    try {
+      const data = await listUsers();
+      setStudents(data);
+    } catch (err) {
+      console.error("Failed to fetch students", err);
+    } finally {
+      setLoadingStudents(false);
+    }
   }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -150,13 +164,16 @@ const TeacherPortal: React.FC = () => {
       </div>
 
       <Tabs defaultValue="create" onValueChange={(v) => { if (v === "view") fetchExams(); }}>
-        <TabsList className="grid w-full grid-cols-2 max-w-sm h-10 p-1"
+        <TabsList className="grid w-full grid-cols-3 max-w-md h-10 p-1"
           style={{ background: "var(--muted)", border: "1px solid var(--border)" }}>
           <TabsTrigger value="create" className="flex items-center gap-1.5 text-sm">
             <PlusCircle className="h-3.5 w-3.5" />New Exam
           </TabsTrigger>
           <TabsTrigger value="view" className="flex items-center gap-1.5 text-sm">
             <ListChecks className="h-3.5 w-3.5" />Saved Exams
+          </TabsTrigger>
+          <TabsTrigger value="students" className="flex items-center gap-1.5 text-sm" onClick={fetchStudents}>
+            <Users className="h-3.5 w-3.5" />My Students
           </TabsTrigger>
         </TabsList>
 
@@ -455,6 +472,65 @@ const TeacherPortal: React.FC = () => {
                 </div>
               ))}
             </div>
+          </div>
+        </TabsContent>
+
+        {/* ── STUDENTS ─────────────────────────────────────────── */}
+        <TabsContent value="students" className="mt-6">
+          <div className="content-card-elevated p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2">
+                <div className="h-7 w-7 rounded-lg flex items-center justify-center"
+                  style={{ background: "#ede9fe" }}>
+                  <Users className="h-4 w-4" style={{ color: "#7c3aed" }} />
+                </div>
+                <h2 className="font-semibold text-base">Registered Students</h2>
+                {students.length > 0 && (
+                  <span className="h-5 min-w-5 px-1.5 rounded-full flex items-center justify-center text-xs font-bold text-white"
+                    style={{ background: "#7c3aed" }}>{students.length}</span>
+                )}
+              </div>
+              <button className="btn-ghost text-xs gap-1.5" style={{ padding: "6px 12px" }}
+                onClick={fetchStudents} disabled={loadingStudents}>
+                <RefreshCw style={{ width: 13, height: 13, animation: loadingStudents ? "spin 0.7s linear infinite" : "none" }} />
+                Refresh
+              </button>
+            </div>
+
+            {loadingStudents ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map(i => (
+                  <div key={i} className="h-16 bg-slate-50 animate-pulse rounded-xl border border-slate-100" />
+                ))}
+              </div>
+            ) : students.length === 0 ? (
+              <div className="text-center py-14 bg-slate-50/50 rounded-2xl border border-dashed">
+                <div className="h-14 w-14 rounded-2xl mx-auto mb-4 flex items-center justify-center"
+                  style={{ background: "#ede9fe", border: "1px solid rgba(124,58,237,0.15)" }}>
+                  <Users className="h-6 w-6" style={{ color: "#7c3aed" }} />
+                </div>
+                <p className="font-medium text-muted-foreground">No students in your class</p>
+                <p className="text-xs text-muted-foreground mt-1">Use the "Register Student" tab in the side menu to add students</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {students.map((s) => (
+                  <div key={s.id} className="p-4 bg-white rounded-xl border border-slate-100 flex items-center gap-4 shadow-sm hover:shadow-md transition-all group">
+                    <div className="h-11 w-11 rounded-full bg-purple-50 flex items-center justify-center font-bold text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors capitalize">
+                      {s.name.charAt(0)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-slate-900 truncate">{s.name}</p>
+                      <div className="flex items-center gap-1.5 text-slate-500 mt-0.5">
+                        <Mail className="h-3 w-3" />
+                        <p className="text-xs truncate">{s.email}</p>
+                      </div>
+                    </div>
+                    <div className="badge-teal px-2 py-0.5 rounded text-[10px] uppercase font-bold tracking-tight">Student</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </TabsContent>
       </Tabs>

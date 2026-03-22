@@ -9,10 +9,43 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Depends, Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy.orm import Session
+from database import get_db, engine, Base
+import models
+from auth import verify_password, create_access_token, decode_access_token
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from groq import Groq
+
+app = FastAPI(title="EduGrade AI API", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+Base.metadata.create_all(bind=engine)
+
+security = HTTPBearer()
+
+def get_current_user(auth: HTTPAuthorizationCredentials = Security(security), db: Session = Depends(get_db)):
+    payload = decode_access_token(auth.credentials)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    email = payload.get("sub")
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+def check_role(user: models.User, roles: list[models.UserRole]):
+    if user.role not in roles:
+        raise HTTPException(status_code=403, detail="Permission denied")
 
 from utils import (
     GROQ_API_KEY,
@@ -25,42 +58,123 @@ from utils import (
 from viva_proctor import check_frame_base64, session_store
 from viva_proctor.proctor import create_session, get_session, delete_session
 
-EXAMS_DIR = os.path.join(os.path.dirname(__file__), "exams")
-os.makedirs(EXAMS_DIR, exist_ok=True)
+class LoginRequest(BaseModel):
+    email: str
+    password: str
 
-SUBMISSIONS_DIR = os.path.join(os.path.dirname(__file__), "data", "submissions")
-os.makedirs(SUBMISSIONS_DIR, exist_ok=True)
+# ══════════════════════════════════════════════════════════════════
+# MANAGEMENT ENDPOINTS
+# ══════════════════════════════════════════════════════════════════
+
+class SchoolCreate(BaseModel):
+    name: str
+
+@app.post("/admin/schools")
+def create_school(req: SchoolCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    check_role(current_user, [models.UserRole.SUPER_ADMIN])
+    school = models.School(name=req.name)
+    db.add(school)
+    db.commit()
+    db.refresh(school)
+    return school
+
+@app.get("/admin/schools")
+def list_schools(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    check_role(current_user, [models.UserRole.SUPER_ADMIN])
+    return db.query(models.School).all()
+
+class UserCreate(BaseModel):
+    email: str
+    password: str
+    name: str
+    role: models.UserRole
+    school_id: Optional[int] = None
+
+@app.post("/admin/users")
+def create_user(req: UserCreate, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    # Super Admin can add anyone
+    # Principal can add Teachers/Students in their school
+    if current_user.role == models.UserRole.SUPER_ADMIN:
+        pass
+    elif current_user.role == models.UserRole.PRINCIPAL:
+        if req.role not in [models.UserRole.TEACHER, models.UserRole.STUDENT]:
+            raise HTTPException(403, "Principals can only add Teachers or Students")
+        req.school_id = current_user.school_id
+    elif current_user.role == models.UserRole.TEACHER:
+        if req.role != models.UserRole.STUDENT:
+            raise HTTPException(403, "Teachers can only add Students")
+        req.school_id = current_user.school_id
+    else:
+        raise HTTPException(403, "Permission denied")
+
+    from auth import get_password_hash
+    user = models.User(
+        email=req.email,
+        password_hash=get_password_hash(req.password),
+        name=req.name,
+        role=req.role,
+        school_id=req.school_id,
+        teacher_id=current_user.id if current_user.role == models.UserRole.TEACHER else None
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {"id": user.id, "email": user.email, "name": user.name, "role": user.role.value}
+
+@app.get("/admin/users")
+def list_users(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    if current_user.role == models.UserRole.SUPER_ADMIN:
+        return db.query(models.User).all()
+    
+    if current_user.role == models.UserRole.PRINCIPAL:
+        return db.query(models.User).filter(models.User.school_id == current_user.school_id).all()
+    
+    if current_user.role == models.UserRole.TEACHER:
+        # Teachers only see students they registered
+        return db.query(models.User).filter(models.User.teacher_id == current_user.id).all()
+    
+    raise HTTPException(403, "Permission denied")
+
+@app.post("/auth/login")
+def login(req: LoginRequest, db: Session = Depends(get_db)):
+    print(f"DEBUG: Login attempt for {req.email}")
+    user = db.query(models.User).filter(models.User.email == req.email).first()
+    if not user or not verify_password(req.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    access_token = create_access_token(data={"sub": user.email})
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "name": user.name,
+            "email": user.email,
+            "role": user.role.value
+        }
+    }
 
 
-def save_submission(exam_id: str, student_name: str, written_result: dict = None, viva_result: dict = None):
+def save_submission(db: Session, exam_id: str, student_name: str, written: dict = None, viva: dict = None):
     # Unique ID per exam + student
     sub_id = f"{exam_id}_{student_name.replace(' ', '_').lower()}"
-    path = os.path.join(SUBMISSIONS_DIR, f"{sub_id}.json")
+    submission = db.query(models.Submission).filter(models.Submission.submission_id == sub_id).first()
     
-    data = {
-        "submission_id": sub_id,
-        "exam_id": exam_id,
-        "student_name": student_name,
-        "submitted_at": datetime.now().isoformat(timespec="seconds"),
-        "written": written_result,
-        "viva": viva_result,
-    }
+    if not submission:
+        submission = models.Submission(
+            submission_id=sub_id,
+            exam_id=exam_id,
+            student_name=student_name,
+            written=written,
+            viva=viva
+        )
+        db.add(submission)
+    else:
+        if written is not None:
+            submission.written = written
+        if viva is not None:
+            submission.viva = viva
     
-    # Merge if exists
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                old = json.load(f)
-            data["submitted_at"] = old.get("submitted_at", data["submitted_at"])
-            if written_result is None:
-                data["written"] = old.get("written")
-            if viva_result is None:
-                data["viva"] = old.get("viva")
-        except:
-            pass
-            
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    db.commit()
     return sub_id
 
 
@@ -250,78 +364,78 @@ def polish_text(raw_text: str) -> str:
     )
     return response.choices[0].message.content.strip()
 
-# ── App ────────────────────────────────────────────────────────────
-app = FastAPI(title="EduGrade AI API", version="1.0.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
 # ══════════════════════════════════════════════════════════════════
 # EXAM CRUD
 # ══════════════════════════════════════════════════════════════════
 
 @app.get("/exams")
-def list_exams():
-    return load_all_exams()
+def list_exams(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    if current_user.role == models.UserRole.SUPER_ADMIN:
+        return db.query(models.Exam).all()
+    
+    if current_user.role == models.UserRole.TEACHER:
+        return db.query(models.Exam).filter(models.Exam.teacher_id == current_user.id).all()
+    
+    if current_user.role == models.UserRole.STUDENT:
+        # Students only see exams from their assigned teacher
+        return db.query(models.Exam).filter(models.Exam.teacher_id == current_user.teacher_id).all()
+    
+    # Principals see everything in the school
+    return db.query(models.Exam).filter(models.Exam.school_id == current_user.school_id).all()
 
 
 @app.get("/exams/{exam_id}")
-def get_exam(exam_id: str):
-    path = os.path.join(EXAMS_DIR, f"{exam_id}.json")
-    if not os.path.exists(path):
+def get_exam(exam_id: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    exam = db.query(models.Exam).filter(models.Exam.exam_id == exam_id).first()
+    if not exam:
         raise HTTPException(404, "Exam not found")
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    if current_user.role != models.UserRole.SUPER_ADMIN and exam.school_id != current_user.school_id:
+        raise HTTPException(403, "Access denied")
+    return exam
 
 
 @app.delete("/exams/{exam_id}")
-def delete_exam(exam_id: str):
-    path = os.path.join(EXAMS_DIR, f"{exam_id}.json")
-    if not os.path.exists(path):
+def delete_exam(exam_id: str, db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    check_role(current_user, [models.UserRole.SUPER_ADMIN, models.UserRole.PRINCIPAL, models.UserRole.TEACHER])
+    exam = db.query(models.Exam).filter(models.Exam.exam_id == exam_id).first()
+    if not exam:
         raise HTTPException(404, "Exam not found")
-    os.remove(path)
-    # Also delete submissions
-    for fname in os.listdir(SUBMISSIONS_DIR):
-        if fname.startswith(f"{exam_id}_"):
-            try:
-                os.remove(os.path.join(SUBMISSIONS_DIR, fname))
-            except:
-                pass
+    if current_user.role != models.UserRole.SUPER_ADMIN and exam.school_id != current_user.school_id:
+        raise HTTPException(403, "Access denied")
+    
+    db.delete(exam)
+    db.commit()
     return {"ok": True}
 
 
 @app.get("/exams/{exam_id}/submissions")
-def get_submissions(exam_id: str):
-    submissions = []
-    for fname in os.listdir(SUBMISSIONS_DIR):
-        if fname.startswith(f"{exam_id}_") and fname.endswith(".json"):
-            try:
-                with open(os.path.join(SUBMISSIONS_DIR, fname), encoding="utf-8") as f:
-                    submissions.append(json.load(f))
-            except:
-                pass
-    # Sort newest first
-    submissions.sort(key=lambda x: x.get("submitted_at", ""), reverse=True)
-    return submissions
+def get_submissions(exam_id: str, db: Session = Depends(get_db)):
+    subs = db.query(models.Submission).filter(models.Submission.exam_id == exam_id).all()
+    import json
+    for s in subs:
+        if isinstance(s.written, str):
+            s.written = json.loads(s.written)
+        if isinstance(s.viva, str):
+            s.viva = json.loads(s.viva)
+    return subs
 
 
 @app.get("/exams/{exam_id}/submissions/{student_name}")
-def get_student_submission(exam_id: str, student_name: str):
+def get_student_submission(exam_id: str, student_name: str, db: Session = Depends(get_db)):
     sub_id = f"{exam_id}_{student_name.replace(' ', '_').lower()}"
-    path = os.path.join(SUBMISSIONS_DIR, f"{sub_id}.json")
-    if os.path.exists(path):
-        try:
-            with open(path, encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            pass
-    raise HTTPException(404, "Submission not found")
+    submission = db.query(models.Submission).filter(models.Submission.submission_id == sub_id).first()
+    if not submission:
+        raise HTTPException(404, "Submission not found")
+    
+    # Ensure JSON fields are parsed if returned as strings (SQLite behavior)
+    if isinstance(submission.written, str):
+        import json
+        submission.written = json.loads(submission.written)
+    if isinstance(submission.viva, str):
+        import json
+        submission.viva = json.loads(submission.viva)
+        
+    return submission
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -373,9 +487,12 @@ async def create_exam(
     questions_file:  Optional[UploadFile] = File(None),
     answer_key_file: Optional[UploadFile] = File(None),
     rubric_file:     Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
 ):
+    check_role(current_user, [models.UserRole.TEACHER, models.UserRole.PRINCIPAL])
+    
     extracted: dict = {}
-
     if questions_file and questions_file.filename:
         extracted["questions"] = await _extract_upload(questions_file, QUESTION_PROMPT)
     if answer_key_file and answer_key_file.filename:
@@ -385,20 +502,21 @@ async def create_exam(
     elif rubric_text.strip():
         extracted["rubrics"] = rubric_text.strip()
 
-    exam_data = {
-        "exam_id":     str(uuid.uuid4())[:8],
-        "title":       title.strip(),
-        "subject":     subject.strip(),
-        "total_marks": total_marks,
-        "created_at":  datetime.now().isoformat(timespec="seconds"),
-        **extracted,
-    }
-
-    path = os.path.join(EXAMS_DIR, f"{exam_data['exam_id']}.json")
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(exam_data, f, indent=2, ensure_ascii=False)
-
-    return exam_data
+    exam = models.Exam(
+        exam_id=str(uuid.uuid4())[:8],
+        title=title.strip(),
+        subject=subject.strip(),
+        total_marks=total_marks,
+        questions=extracted.get("questions"),
+        answer_key=extracted.get("answer_key"),
+        rubrics=extracted.get("rubrics"),
+        school_id=current_user.school_id,
+        teacher_id=current_user.id
+    )
+    db.add(exam)
+    db.commit()
+    db.refresh(exam)
+    return exam
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -412,18 +530,24 @@ class GradeTextRequest(BaseModel):
 
 
 @app.post("/grade/text")
-def grade_text(req: GradeTextRequest):
+def grade_text(req: GradeTextRequest, db: Session = Depends(get_db)):
     sub_id = f"{req.exam_id}_{req.student_name.replace(' ', '_').lower()}"
-    if os.path.exists(os.path.join(SUBMISSIONS_DIR, f"{sub_id}.json")):
+    if db.query(models.Submission).filter(models.Submission.submission_id == sub_id).first():
         raise HTTPException(400, "You have already submitted an answer for this exam.")
 
-    path = os.path.join(EXAMS_DIR, f"{req.exam_id}.json")
-    if not os.path.exists(path):
+    exam = db.query(models.Exam).filter(models.Exam.exam_id == req.exam_id).first()
+    if not exam:
         raise HTTPException(404, "Exam not found")
-    with open(path, encoding="utf-8") as f:
-        exam = json.load(f)
-    result = grade_answer(exam, req.student_answer)
-    save_submission(req.exam_id, req.student_name, written_result=result)
+    
+    # Convert DB object back to dict for the logic
+    exam_dict = {
+        "questions": exam.questions,
+        "answer_key": exam.answer_key,
+        "rubrics": exam.rubrics,
+        "total_marks": exam.total_marks
+    }
+    result = grade_answer(exam_dict, req.student_answer)
+    save_submission(db, req.exam_id, req.student_name, written=result)
     return result
 
 
@@ -432,16 +556,23 @@ async def grade_image(
     exam_id: str = Form(...),
     student_name: str = Form(...),
     answer_file: UploadFile = File(...),
+    db: Session = Depends(get_db)
 ):
     sub_id = f"{exam_id}_{student_name.replace(' ', '_').lower()}"
-    if os.path.exists(os.path.join(SUBMISSIONS_DIR, f"{sub_id}.json")):
+    existing = db.query(models.Submission).filter(models.Submission.submission_id == sub_id).first()
+    if existing and existing.written_result:
         raise HTTPException(400, "You have already submitted an answer for this exam.")
 
-    path = os.path.join(EXAMS_DIR, f"{exam_id}.json")
-    if not os.path.exists(path):
+    exam = db.query(models.Exam).filter(models.Exam.exam_id == exam_id).first()
+    if not exam:
         raise HTTPException(404, "Exam not found")
-    with open(path, encoding="utf-8") as f:
-        exam = json.load(f)
+    
+    exam_dict = {
+        "questions": exam.questions,
+        "answer_key": exam.answer_key,
+        "rubrics": exam.rubrics,
+        "total_marks": exam.total_marks
+    }
 
     raw = await answer_file.read()
 
@@ -455,9 +586,12 @@ async def grade_image(
             pass
 
     fake = _FakeFile(answer_file.filename, raw)
+    # Using local import for utils to avoid circular issues
+    from utils import file_to_image_bytes_list
+    
     pages = file_to_image_bytes_list(fake)
-    extracted_answer, result = grade_from_images(exam, pages)
-    save_submission(exam_id, student_name, written_result={"extracted_answer": extracted_answer, **result})
+    extracted_answer, result = grade_from_images(exam_dict, pages)
+    save_submission(db, exam_id, student_name, written={"extracted_answer": extracted_answer, **result})
     return {"extracted_answer": extracted_answer, **result}
 
 
@@ -472,13 +606,16 @@ class VivaGenRequest(BaseModel):
 
 
 @app.post("/viva/generate")
-def viva_generate(req: VivaGenRequest):
-    path = os.path.join(EXAMS_DIR, f"{req.exam_id}.json")
-    if not os.path.exists(path):
+def viva_generate(req: VivaGenRequest, db: Session = Depends(get_db)):
+    exam = db.query(models.Exam).filter(models.Exam.exam_id == req.exam_id).first()
+    if not exam:
         raise HTTPException(404, "Exam not found")
-    with open(path, encoding="utf-8") as f:
-        exam = json.load(f)
-    questions = generate_viva_questions(exam, req.student_answer, req.num_questions)
+    
+    exam_dict = {
+        "subject": exam.subject,
+        "questions": exam.questions
+    }
+    questions = generate_viva_questions(exam_dict, req.student_answer, req.num_questions)
     return {"questions": questions}
 
 
@@ -496,14 +633,16 @@ class VivaGradeRequest(BaseModel):
 
 
 @app.post("/viva/grade")
-def viva_grade(req: VivaGradeRequest):
-    path = os.path.join(EXAMS_DIR, f"{req.exam_id}.json")
-    if not os.path.exists(path):
+def viva_grade(req: VivaGradeRequest, db: Session = Depends(get_db)):
+    exam = db.query(models.Exam).filter(models.Exam.exam_id == req.exam_id).first()
+    if not exam:
         raise HTTPException(404, "Exam not found")
-    with open(path, encoding="utf-8") as f:
-        exam = json.load(f)
-    result = grade_viva(exam, req.student_answer, [q.model_dump() for q in req.qa_pairs])
-    save_submission(req.exam_id, req.student_name, viva_result=result)
+    
+    exam_dict = {
+        "subject": exam.subject
+    }
+    result = grade_viva(exam_dict, req.student_answer, [q.model_dump() for q in req.qa_pairs])
+    save_submission(db, req.exam_id, req.student_name, viva=result)
     return result
 
 
@@ -513,12 +652,8 @@ class VivaFailRequest(BaseModel):
     reason: str
 
 @app.post("/viva/fail")
-def viva_fail(req: VivaFailRequest):
+def viva_fail(req: VivaFailRequest, db: Session = Depends(get_db)):
     """Permanently record a 0 score for a student who was terminated by the proctor."""
-    path = os.path.join(EXAMS_DIR, f"{req.exam_id}.json")
-    if not os.path.exists(path):
-        raise HTTPException(404, "Exam not found")
-        
     result = {
         "marks_obtained": 0,
         "total_marks": 10,
@@ -527,8 +662,8 @@ def viva_fail(req: VivaFailRequest):
         "breakdown": [],
         "overall_feedback": req.reason
     }
-    save_submission(req.exam_id, req.student_name, viva_result=result)
-    return result
+    save_submission(db, req.exam_id, req.student_name, viva=result)
+    return {"status": "failed_recorded", "result": result}
 
 
 # ══════════════════════════════════════════════════════════════════
