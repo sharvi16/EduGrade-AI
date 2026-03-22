@@ -41,13 +41,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = useCallback(async (email: string, password: string): Promise<boolean> => {
     try {
       const baseUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+      console.log(`Attempting login at: ${baseUrl}/auth/login`);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+      
       const response = await fetch(`${baseUrl}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
+        signal: controller.signal
       });
-      if (!response.ok) return false;
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        console.error(`Login failed with status: ${response.status}`);
+        return false;
+      }
+      
       const data = await response.json();
+      console.log("Login successful, updating user state.");
+      
       setUser({
         name: data.user.name,
         email: data.user.email,
@@ -55,7 +70,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         token: data.access_token,
       });
       return true;
-    } catch {
+    } catch (err: any) {
+      console.error("Login request error:", err.name === 'AbortError' ? 'Request timed out' : err);
       return false;
     }
   }, []);
